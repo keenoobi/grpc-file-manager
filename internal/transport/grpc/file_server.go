@@ -3,6 +3,7 @@ package grpc
 import (
 	"context"
 	"io"
+	"os"
 
 	"github.com/keenoobi/grpc-file-manager/api/proto"
 	"github.com/keenoobi/grpc-file-manager/internal/usecase"
@@ -74,6 +75,9 @@ func (s *fileServiceServer) UploadFile(stream proto.FileService_UploadFileServer
 func (s *fileServiceServer) DownloadFile(req *proto.DownloadFileRequest, stream proto.FileService_DownloadFileServer) error {
 	file, reader, err := s.fileUseCase.DownloadFile(stream.Context(), req.GetFilename())
 	if err != nil {
+		if os.IsNotExist(err) {
+			return status.Error(codes.NotFound, "file not found")
+		}
 		return status.Errorf(codes.Internal, "cannot read file: %v", err)
 	}
 	defer reader.Close()

@@ -2,7 +2,9 @@ package usecase
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/keenoobi/grpc-file-manager/internal/entity"
@@ -24,6 +26,10 @@ func NewFileUseCase(repo repository.FileRepository) FileUseCase {
 }
 
 func (uc *fileUseCase) UploadFile(ctx context.Context, filename string, data io.Reader) (*entity.File, error) {
+	if !isValidFilename(filename) {
+		return nil, fmt.Errorf("invalid filename")
+	}
+
 	file := &entity.File{
 		Name:      filename,
 		CreatedAt: time.Now(),
@@ -43,4 +49,21 @@ func (uc *fileUseCase) DownloadFile(ctx context.Context, filename string) (*enti
 
 func (uc *fileUseCase) ListFiles(ctx context.Context) ([]*entity.File, error) {
 	return uc.repo.List(ctx)
+}
+
+func isValidFilename(filename string) bool {
+	if filename == "" || len(filename) > 255 {
+		return false
+	}
+	// Запрещаем: ../, ~/, /, \
+	if strings.Contains(filename, "..") || strings.ContainsAny(filename, `/\~`) {
+		return false
+	}
+	// Проверяем на недопустимые символы (например, управляющие символы ASCII)
+	for _, r := range filename {
+		if r < 32 || r == 127 {
+			return false
+		}
+	}
+	return true
 }

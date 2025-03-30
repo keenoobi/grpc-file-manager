@@ -9,8 +9,8 @@ import (
 )
 
 type ConcurrencyLimiter struct {
-	uploadSem chan struct{} // Для Upload/Download
-	listSem   chan struct{} // Для ListFiles
+	uploadSem chan struct{}
+	listSem   chan struct{}
 }
 
 func NewConcurrencyLimiter(uploadLimit, listLimit int) *ConcurrencyLimiter {
@@ -20,7 +20,7 @@ func NewConcurrencyLimiter(uploadLimit, listLimit int) *ConcurrencyLimiter {
 	}
 }
 
-func (l *ConcurrencyLimiter) UnaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+func (l *ConcurrencyLimiter) UnaryInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	// Определяем какой лимит применять
 	var sem chan struct{}
 	if info.FullMethod == "/file_service.FileService/ListFiles" {
@@ -38,7 +38,7 @@ func (l *ConcurrencyLimiter) UnaryInterceptor(ctx context.Context, req interface
 	}
 }
 
-func (l *ConcurrencyLimiter) StreamInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+func (l *ConcurrencyLimiter) StreamInterceptor(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 	// Применяем только для Upload/Download
 	if info.FullMethod != "/file_service.FileService/UploadFile" &&
 		info.FullMethod != "/file_service.FileService/DownloadFile" {

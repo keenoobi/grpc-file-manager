@@ -10,69 +10,60 @@ import (
 	"time"
 
 	"github.com/keenoobi/grpc-file-manager/api/proto"
+	"github.com/keenoobi/grpc-file-manager/config"
+	"github.com/keenoobi/grpc-file-manager/internal/middleware"
 	"github.com/keenoobi/grpc-file-manager/internal/repository"
 	grpctransport "github.com/keenoobi/grpc-file-manager/internal/transport/grpc"
 	"github.com/keenoobi/grpc-file-manager/internal/usecase"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/reflection"
-	"google.golang.org/grpc/status"
 )
 
 const (
-	defaultStoragePath = "./storage"
-	defaultPort        = ":50051"
-	shutdownTimeout    = 5 * time.Second
+	shutdownTimeout = 5 * time.Second
 )
 
 func main() {
-	// 1. Configuration setup
-	storagePath := getEnv("STORAGE_PATH", defaultStoragePath)
-	port := getEnv("PORT", defaultPort)
+	cfg, err := config.Load("config/config.yaml")
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
 
-	// 2. Initialize dependencies
-	repo := repository.NewFileRepository(storagePath)
+	repo := repository.NewFileRepository(cfg.Storage.Path)
 	useCase := usecase.NewFileUseCase(repo)
 	fileServiceServer := grpctransport.NewFileServiceServer(useCase)
 
-	// 3. Create gRPC server with interceptors
+	limiter := middleware.NewConcurrencyLimiter(cfg.Limits.Upload, cfg.Limits.List)
+
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
-			loggingUnaryInterceptor,
-			recoveryUnaryInterceptor,
+			limiter.UnaryInterceptor,
+			middleware.LoggingUnaryInterceptor,
+			middleware.RecoveryUnaryInterceptor,
 		),
 		grpc.ChainStreamInterceptor(
-			loggingStreamInterceptor,
-			recoveryStreamInterceptor,
+			limiter.StreamInterceptor,
+			middleware.LoggingStreamInterceptor,
+			middleware.RecoveryStreamInterceptor,
 		),
 	)
 
-	// 4. Register services
 	proto.RegisterFileServiceServer(grpcServer, fileServiceServer)
-	reflection.Register(grpcServer) // Enable gRPC reflection for testing
+	reflection.Register(grpcServer)
 
-	// 5. Start server with graceful shutdown
-	listener, err := net.Listen("tcp", port)
+	listener, err := net.Listen("tcp", cfg.Server.Port)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
 	go func() {
-		log.Printf("Server started on %s, storage path: %s", port, storagePath)
+		log.Printf("Server started on %s, storage path: %s", cfg.Server.Port, cfg.Storage.Path)
 		if err := grpcServer.Serve(listener); err != nil && err != grpc.ErrServerStopped {
 			log.Fatalf("failed to serve: %v", err)
 		}
 	}()
 
-	// 6. Graceful shutdown handling
 	waitForShutdown(grpcServer)
-}
-
-func getEnv(key, defaultValue string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
-	}
-	return defaultValue
 }
 
 func waitForShutdown(server *grpc.Server) {
@@ -99,49 +90,4 @@ func waitForShutdown(server *grpc.Server) {
 	case <-stopped:
 		log.Println("Server stopped gracefully")
 	}
-}
-
-// Interceptors for logging and recovery
-func loggingUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
-	start := time.Now()
-	log.Printf("Unary call: %s, request: %v", info.FullMethod, req)
-
-	resp, err = handler(ctx, req)
-
-	log.Printf("Unary call completed: %s, duration: %v, error: %v",
-		info.FullMethod, time.Since(start), err)
-	return
-}
-
-func loggingStreamInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-	start := time.Now()
-	log.Printf("Stream call started: %s", info.FullMethod)
-
-	err := handler(srv, ss)
-
-	log.Printf("Stream call completed: %s, duration: %v, error: %v",
-		info.FullMethod, time.Since(start), err)
-	return err
-}
-
-func recoveryUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("Recovered from panic in unary handler: %v", r)
-			err = status.Errorf(codes.Internal, "internal server error")
-		}
-	}()
-
-	return handler(ctx, req)
-}
-
-func recoveryStreamInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("Recovered from panic in stream handler: %v", r)
-			err = status.Errorf(codes.Internal, "internal server error")
-		}
-	}()
-
-	return handler(srv, ss)
 }

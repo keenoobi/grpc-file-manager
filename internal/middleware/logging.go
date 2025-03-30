@@ -8,7 +8,6 @@ import (
 	"google.golang.org/grpc"
 )
 
-// Interceptors for logging and recovery
 func LoggingUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
 	start := time.Now()
 	log.Printf("Unary call: %s, request: %v", info.FullMethod, req)

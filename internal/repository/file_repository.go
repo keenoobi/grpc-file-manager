@@ -2,9 +2,11 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/keenoobi/grpc-file-manager/internal/entity"
 )
@@ -28,15 +30,32 @@ func NewFileRepository(storagePath string) FileRepository {
 
 func (r *fileRepository) Save(ctx context.Context, file *entity.File, data io.Reader) error {
 	path := filepath.Join(r.storagePath, file.Name)
-	f, err := os.Create(path)
+
+	// Создаем временный файл
+	tempPath := path + ".tmp"
+	f, err := os.Create(tempPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("create temp file failed: %w", err)
 	}
-	defer f.Close()
+
+	defer func() {
+		if err != nil {
+			os.Remove(tempPath)
+		}
+	}()
 
 	size, err := io.Copy(f, data)
 	if err != nil {
-		return err
+		f.Close()
+		return fmt.Errorf("write failed: %w", err)
+	}
+
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close failed: %w", err)
+	}
+
+	if err := os.Rename(tempPath, path); err != nil {
+		return fmt.Errorf("rename failed: %w", err)
 	}
 
 	file.Size = size
@@ -46,6 +65,10 @@ func (r *fileRepository) Save(ctx context.Context, file *entity.File, data io.Re
 
 func (r *fileRepository) Get(ctx context.Context, filename string) (*entity.File, io.ReadCloser, error) {
 	path := filepath.Join(r.storagePath, filename)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil, nil, err // Возвращаем оригинальную ошибку
+	}
+
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, nil, err
@@ -92,6 +115,9 @@ func (r *fileRepository) List(ctx context.Context) ([]*entity.File, error) {
 			Path:      filepath.Join(r.storagePath, entry.Name()),
 		})
 	}
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].CreatedAt.After(files[j].CreatedAt)
+	})
 
 	return files, nil
 }

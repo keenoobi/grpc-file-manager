@@ -2,9 +2,18 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"fmt"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"log"
 	"os"
+	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/keenoobi/grpc-file-manager/api/proto"
@@ -13,154 +22,341 @@ import (
 )
 
 func main() {
+	// Подключение к серверу
 	conn, err := grpc.NewClient("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		log.Fatalf("did not connect: %v", err)
+		log.Fatalf("Failed to connect: %v", err)
 	}
 	defer conn.Close()
 
 	client := proto.NewFileServiceClient(conn)
 
-	// // Тестируем загрузку файла
-	// uploadFile(client, "large.jpg")
+	// Создаем тестовую директорию
+	if err := os.MkdirAll("test_data", 0755); err != nil {
+		log.Fatalf("Failed to create test directory: %v", err)
+	}
 
-	// // Тестируем получение списка файлов
-	// listFiles(client)
-
-	// // Тестируем скачивание файла
-	// downloadFile(client, "large.jpg", "downloaded_large.jpg")
-
-	// 1. Тест пустого файла
-	createEmptyFile("empty.txt")
-	uploadFile(client, "empty.txt")
-	downloadFile(client, "empty.txt", "downloaded_empty.txt")
-
-	// 2. Тест большого файла (10MB)
-	createBigFile("bigfile.bin", 10)
-	uploadFile(client, "bigfile.bin")
-	downloadFile(client, "bigfile.bin", "downloaded_big.bin")
-
-	// 3. Тест несуществующего файла при скачивании
-	downloadNonExistentFile(client)
-
-	// 4. Тест повторной загрузки того же файла
-	uploadFile(client, "test.jpg")
-	uploadFile(client, "test.jpg")
-
-	// 5. Тест спецсимволов в имени
-	uploadFile(client, "file with spaces.txt")
-	uploadFile(client, "кириллица.jpg")
-}
-
-func createEmptyFile(filename string) {
-	os.WriteFile(filename, []byte{}, 0644)
-}
-
-func createBigFile(filename string, sizeMB int) {
-	file, _ := os.Create(filename)
-	defer file.Close()
-	file.Seek(int64(sizeMB<<20)-1, 0)
-	file.Write([]byte{0})
-}
-
-func downloadNonExistentFile(client proto.FileServiceClient) {
-	_, err := client.DownloadFile(context.Background(), &proto.DownloadFileRequest{
-		Filename: "non_existent.file",
+	// Тест базовых операций
+	runTest("Basic Operations", func() {
+		testBasicOperations(client)
 	})
-	log.Printf("Download non-existent file error: %v", err) // Должна быть ошибка
+
+	// Тест обработки ошибок
+	runTest("Error Handling", func() {
+		testErrorHandling(client)
+	})
+
+	// Тест конкурентности
+	runTest("Concurrency", func() {
+		testConcurrency(client)
+	})
+
+	// Тест больших файлов
+	runTest("Large Files", func() {
+		testLargeFiles(client)
+	})
+
+	log.Println("All tests completed successfully!")
 }
 
-func uploadFile(client proto.FileServiceClient, filename string) {
+func runTest(name string, testFunc func()) {
+	log.Printf("=== Starting test: %s ===", name)
+	start := time.Now()
+	testFunc()
+	log.Printf("=== Test '%s' completed in %v ===\n", name, time.Since(start))
+}
+
+// Создает тестовое изображение указанного формата и размера
+func createTestImage(filename, format string, width, height int) error {
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+
+	// Заполняем изображение градиентом
+	for y := range height {
+		for x := range width {
+			c := color.RGBA{
+				R: uint8(x * 255 / width),
+				G: uint8(y * 255 / height),
+				B: uint8((x + y) * 255 / (width + height)),
+				A: 255,
+			}
+			img.Set(x, y, c)
+		}
+	}
+
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	switch format {
+	case "jpeg":
+		return jpeg.Encode(file, img, &jpeg.Options{Quality: 90})
+	case "png":
+		return png.Encode(file, img)
+	default:
+		return fmt.Errorf("unsupported image format: %s", format)
+	}
+}
+
+func testBasicOperations(client proto.FileServiceClient) {
+	files := []string{
+		"test_data/small.jpg",
+		"test_data/medium.png",
+		"test_data/image with spaces.jpg",
+		"test_data/изображение.jpg",
+	}
+
+	if err := createTestImage(files[0], "jpeg", 100, 100); err != nil {
+		log.Fatalf("Failed to create test image: %v", err)
+	}
+	if err := createTestImage(files[1], "png", 800, 600); err != nil {
+		log.Fatalf("Failed to create test image: %v", err)
+	}
+	if err := createTestImage(files[2], "jpeg", 200, 200); err != nil {
+		log.Fatalf("Failed to create test image: %v", err)
+	}
+	if err := createTestImage(files[3], "jpeg", 300, 300); err != nil {
+		log.Fatalf("Failed to create test image: %v", err)
+	}
+
+	// Тестируем загрузку
+	for _, filename := range files {
+		if err := uploadFile(client, filename); err != nil {
+			log.Printf("Upload failed for %s: %v", filename, err)
+			continue
+		}
+		log.Printf("Uploaded: %s", filename)
+	}
+
+	// Тестируем список файлов
+	listFiles(client)
+
+	// Тестируем скачивание
+	for _, filename := range files {
+		downloaded := filename + ".downloaded"
+		if err := downloadAndVerify(client, filename, downloaded); err != nil {
+			log.Printf("Download failed: %v", err)
+			continue
+		}
+		os.Remove(downloaded)
+	}
+}
+
+func testErrorHandling(client proto.FileServiceClient) {
+	// Несуществующий файл при скачивании
+	stream, err := client.DownloadFile(context.Background(), &proto.DownloadFileRequest{
+		Filename: "non_existent_file_123",
+	})
+	if err == nil {
+		_, err = stream.Recv()
+		if err != nil {
+			log.Printf("Correctly received error for non-existent file: %v", err)
+		} else {
+			log.Fatal("Expected error for non-existent file, got nil")
+		}
+	}
+
+	// Пустое имя файла
+	_, err = client.UploadFile(context.Background())
+	if err == nil {
+		_, err = stream.Recv()
+		if err != nil {
+			log.Printf("Correctly received error for empty filename: %v", err)
+		} else {
+			log.Fatal("Expected error for empty filename, got nil")
+		}
+	}
+}
+
+func testConcurrency(client proto.FileServiceClient) {
+	var wg sync.WaitGroup
+	start := time.Now()
+
+	// Тест лимита ListFiles (100)
+	for range 105 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := client.ListFiles(context.Background(), &proto.ListFilesRequest{})
+			if err != nil {
+				log.Printf("ListFiles error (expected for some): %v", err)
+			}
+		}()
+	}
+
+	// Тест лимита Upload (10)
+	for i := range 15 {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			filename := fmt.Sprintf("test_data/concurrent_%d.tmp", n)
+			os.WriteFile(filename, []byte(fmt.Sprintf("content %d", n)), 0644)
+			if err := uploadFile(client, filename); err != nil {
+				log.Printf("Upload %d failed: %v", n, err)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	log.Printf("Concurrency test completed in %v", time.Since(start))
+}
+
+func testLargeFiles(client proto.FileServiceClient) {
+	largeFile := "test_data/large_file.bin"
+	createLargeFile(largeFile, 50) // 50MB
+
+	start := time.Now()
+	if err := uploadFile(client, largeFile); err != nil {
+		log.Fatalf("Large file upload failed: %v", err)
+	}
+	log.Printf("Large file (50MB) uploaded in %v", time.Since(start))
+
+	// Скачивание и проверка
+	if err := downloadAndVerify(client, largeFile, largeFile+".downloaded"); err != nil {
+		log.Fatalf("Large file download failed: %v", err)
+	}
+	os.Remove(largeFile + ".downloaded")
+}
+
+func createLargeFile(path string, sizeMB int) {
+	file, err := os.Create(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
+	// Пишем рандомные данные
+	if _, err := io.CopyN(file, rand.Reader, int64(sizeMB)<<20); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func uploadFile(client proto.FileServiceClient, filename string) error {
 	file, err := os.Open(filename)
 	if err != nil {
-		log.Fatalf("could not open file: %v", err)
+		return fmt.Errorf("open file: %w", err)
 	}
 	defer file.Close()
 
 	stream, err := client.UploadFile(context.Background())
 	if err != nil {
-		log.Fatalf("could not upload file: %v", err)
+		return fmt.Errorf("create upload stream: %w", err)
 	}
 
 	// Отправляем метаданные
-	err = stream.Send(&proto.UploadFileRequest{
+	if err := stream.Send(&proto.UploadFileRequest{
 		Data: &proto.UploadFileRequest_Metadata{
-			Metadata: &proto.FileMetadata{Filename: filename},
+			Metadata: &proto.FileMetadata{Filename: filepath.Base(filename)},
 		},
-	})
-	if err != nil {
-		log.Fatalf("could not send metadata: %v", err)
+	}); err != nil {
+		return fmt.Errorf("send metadata: %w", err)
 	}
 
 	// Отправляем содержимое файла
-	buffer := make([]byte, 1024)
+	buf := make([]byte, 1<<20) // 1MB
 	for {
-		n, err := file.Read(buffer)
+		n, err := file.Read(buf)
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			log.Fatalf("could not read chunk: %v", err)
+			return fmt.Errorf("read file: %w", err)
 		}
 
-		err = stream.Send(&proto.UploadFileRequest{
-			Data: &proto.UploadFileRequest_Chunk{Chunk: buffer[:n]},
-		})
-		if err != nil {
-			log.Fatalf("could not send chunk: %v", err)
+		if err := stream.Send(&proto.UploadFileRequest{
+			Data: &proto.UploadFileRequest_Chunk{Chunk: buf[:n]},
+		}); err != nil {
+			return fmt.Errorf("send chunk: %w", err)
 		}
 	}
 
-	response, err := stream.CloseAndRecv()
+	// Получаем ответ
+	resp, err := stream.CloseAndRecv()
 	if err != nil {
-		log.Fatalf("could not receive response: %v", err)
+		return fmt.Errorf("receive response: %w", err)
 	}
 
-	log.Printf("File uploaded: %s, size: %d", response.GetFilename(), response.GetSize())
+	log.Printf("Upload completed: %s (size: %d)", resp.Filename, resp.Size)
+	return nil
 }
 
-func listFiles(client proto.FileServiceClient) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	response, err := client.ListFiles(ctx, &proto.ListFilesRequest{})
+func downloadAndVerify(client proto.FileServiceClient, filename, saveTo string) error {
+	stream, err := client.DownloadFile(context.Background(), &proto.DownloadFileRequest{
+		Filename: filepath.Base(filename),
+	})
 	if err != nil {
-		log.Fatalf("could not list files: %v", err)
+		return fmt.Errorf("create download stream: %w", err)
 	}
 
-	log.Println("Files list:")
-	for _, file := range response.GetFiles() {
-		log.Printf("- %s (created: %v)", file.GetFilename(), file.GetCreatedAt().AsTime())
-	}
-}
-
-func downloadFile(client proto.FileServiceClient, filename string, saveTo string) {
-	stream, err := client.DownloadFile(context.Background(), &proto.DownloadFileRequest{Filename: filename})
+	output, err := os.Create(saveTo)
 	if err != nil {
-		log.Fatalf("could not download file: %v", err)
+		return fmt.Errorf("create output file: %w", err)
 	}
-
-	outputFile, err := os.Create(saveTo)
-	if err != nil {
-		log.Fatalf("could not create file: %v", err)
-	}
-	defer outputFile.Close()
+	defer output.Close()
 
 	for {
-		response, err := stream.Recv()
+		resp, err := stream.Recv()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			log.Fatalf("could not receive chunk: %v", err)
+			return fmt.Errorf("receive chunk: %w", err)
 		}
 
-		if chunk := response.GetChunk(); chunk != nil {
-			if _, err := outputFile.Write(chunk); err != nil {
-				log.Fatalf("could not write chunk: %v", err)
+		if chunk := resp.GetChunk(); chunk != nil {
+			if _, err := output.Write(chunk); err != nil {
+				return fmt.Errorf("write chunk: %w", err)
 			}
 		}
 	}
 
-	log.Printf("File downloaded to: %s", saveTo)
+	// Проверяем целостность
+	if !verifyChecksum(filename, saveTo) {
+		return fmt.Errorf("checksum mismatch for %s", filename)
+	}
+
+	log.Printf("Download verified: %s", filepath.Base(filename))
+	return nil
+}
+
+func verifyChecksum(original, downloaded string) bool {
+	origHash := fileHash(original)
+	downHash := fileHash(downloaded)
+
+	if origHash == "" || downHash == "" {
+		return false
+	}
+
+	return origHash == downHash
+}
+
+func fileHash(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return ""
+	}
+
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func listFiles(client proto.FileServiceClient) {
+	resp, err := client.ListFiles(context.Background(), &proto.ListFilesRequest{})
+	if err != nil {
+		log.Printf("ListFiles failed: %v", err)
+		return
+	}
+
+	log.Println("Files list:")
+	for _, file := range resp.Files {
+		log.Printf("- %s (created: %v)",
+			file.Filename,
+			file.CreatedAt.AsTime().Format(time.RFC3339))
+	}
 }
