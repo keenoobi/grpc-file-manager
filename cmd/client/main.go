@@ -186,12 +186,12 @@ func testConcurrency(client proto.FileServiceClient) {
 	}
 
 	// Тест лимита Upload (10)
-	for i := range 15 {
+	for i := range 100 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			filename := fmt.Sprintf("test_data/concurrent_%d.tmp", n)
-			os.WriteFile(filename, []byte(fmt.Sprintf("content %d", n)), 0644)
+			filename := fmt.Sprintf("test_data/concurrent_%d.jpg", n)
+			os.WriteFile(filename, fmt.Appendf(nil, "content %d", n), 0644)
 			if err := uploadFile(client, filename); err != nil {
 				log.Printf("Upload %d failed: %v", n, err)
 			}

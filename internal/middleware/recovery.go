@@ -2,7 +2,7 @@ package middleware
 
 import (
 	"context"
-	"log"
+	"log/slog"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -12,7 +12,7 @@ import (
 func RecoveryUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Recovered from panic in unary handler: %v", r)
+			slog.Info("Recovered from panic in unary handler")
 			err = status.Errorf(codes.Internal, "internal server error")
 		}
 	}()
@@ -23,7 +23,7 @@ func RecoveryUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.U
 func RecoveryStreamInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Recovered from panic in stream handler: %v", r)
+			slog.Info("Recovered from panic in stream handler")
 			err = status.Errorf(codes.Internal, "internal server error")
 		}
 	}()

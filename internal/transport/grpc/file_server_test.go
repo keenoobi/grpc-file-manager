@@ -1,9 +1,9 @@
-// internal/transport/grpc/server_test.go
 package grpc
 
 import (
 	"context"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +30,36 @@ func (m *MockFileUseCase) DownloadFile(ctx context.Context, filename string) (*e
 func (m *MockFileUseCase) ListFiles(ctx context.Context) ([]*entity.File, error) {
 	args := m.Called(ctx)
 	return args.Get(0).([]*entity.File), args.Error(1)
+}
+
+type mockUploadStream struct {
+	proto.FileService_UploadFileServer
+	ctx          context.Context
+	reqs         []*proto.UploadFileRequest
+	index        int
+	lastResponse *proto.UploadFileResponse
+	sendErr      error
+}
+
+func (m *mockUploadStream) Context() context.Context {
+	if m.ctx == nil {
+		return context.Background()
+	}
+	return m.ctx
+}
+
+func (m *mockUploadStream) Recv() (*proto.UploadFileRequest, error) {
+	if m.index >= len(m.reqs) {
+		return nil, io.EOF
+	}
+	req := m.reqs[m.index]
+	m.index++
+	return req, nil
+}
+
+func (m *mockUploadStream) SendAndClose(resp *proto.UploadFileResponse) error {
+	m.lastResponse = resp
+	return m.sendErr
 }
 
 func TestUploadFile_Success(t *testing.T) {
@@ -65,32 +95,55 @@ func TestUploadFile_Success(t *testing.T) {
 	mockUC.AssertExpectations(t)
 }
 
-type mockUploadStream struct {
-	proto.FileService_UploadFileServer
-	ctx          context.Context
-	reqs         []*proto.UploadFileRequest
-	index        int
-	lastResponse *proto.UploadFileResponse
-	sendErr      error
-}
+func TestDownloadFile_Success(t *testing.T) {
+	mockUC := new(MockFileUseCase)
+	server := NewFileServiceServer(mockUC)
 
-func (m *mockUploadStream) Context() context.Context {
-	if m.ctx == nil {
-		return context.Background()
+	mockFile := &entity.File{
+		Name:      "test.txt",
+		Size:      4,
+		CreatedAt: time.Now(),
 	}
-	return m.ctx
+	mockReader := io.NopCloser(strings.NewReader("data"))
+	mockUC.On("DownloadFile", mock.Anything, "test.txt").Return(mockFile, mockReader, nil)
+
+	mockStream := &mockDownloadStream{}
+	err := server.DownloadFile(&proto.DownloadFileRequest{Filename: "test.txt"}, mockStream)
+	require.NoError(t, err)
+	require.Len(t, mockStream.responses, 2)
+	mockUC.AssertExpectations(t)
 }
 
-func (m *mockUploadStream) Recv() (*proto.UploadFileRequest, error) {
-	if m.index >= len(m.reqs) {
-		return nil, io.EOF
+type mockDownloadStream struct {
+	proto.FileService_DownloadFileServer
+	responses []*proto.DownloadFileResponse
+	sendErr   error
+}
+
+func (m *mockDownloadStream) Context() context.Context {
+	return context.Background()
+}
+
+func (m *mockDownloadStream) Send(resp *proto.DownloadFileResponse) error {
+	if m.sendErr != nil {
+		return m.sendErr
 	}
-	req := m.reqs[m.index]
-	m.index++
-	return req, nil
+	m.responses = append(m.responses, resp)
+	return nil
 }
 
-func (m *mockUploadStream) SendAndClose(resp *proto.UploadFileResponse) error {
-	m.lastResponse = resp
-	return m.sendErr
+func TestListFiles_Success(t *testing.T) {
+	mockUC := new(MockFileUseCase)
+	server := NewFileServiceServer(mockUC)
+
+	mockFiles := []*entity.File{
+		{Name: "file1.txt", CreatedAt: time.Now(), UpdatedAt: time.Now()},
+		{Name: "file2.txt", CreatedAt: time.Now(), UpdatedAt: time.Now()},
+	}
+	mockUC.On("ListFiles", mock.Anything).Return(mockFiles, nil)
+
+	resp, err := server.ListFiles(context.Background(), &proto.ListFilesRequest{})
+	require.NoError(t, err)
+	require.Len(t, resp.Files, 2)
+	mockUC.AssertExpectations(t)
 }

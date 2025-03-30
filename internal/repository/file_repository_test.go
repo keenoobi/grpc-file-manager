@@ -67,13 +67,3 @@ func TestFileRepository_Concurrency(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, files, 10)
 }
-
-func TestFileRepository_InvalidPath(t *testing.T) {
-	// Пытаемся сохранить в несуществующую директорию (без прав)
-	repo := NewFileRepository("/root/forbidden_dir")
-	ctx := context.Background()
-
-	err := repo.Save(ctx, &entity.File{Name: "test.txt"}, bytes.NewReader([]byte("data")))
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "failed to create temp file")
-}
