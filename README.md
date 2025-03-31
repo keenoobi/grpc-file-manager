@@ -2,7 +2,7 @@
 
 ![Go](https://img.shields.io/badge/Go-1.20+-blue)
 ![gRPC](https://img.shields.io/badge/gRPC-1.50+-brightgreen)
-![Coverage](https://img.shields.io/badge/Coverage-85%25-green)
+![Coverage](https://img.shields.io/badge/Coverage-75%25-green)
 
 Сервис для управления файлами по gRPC с поддержкой потоковой передачи и ограничением конкурентных запросов.
 
