@@ -1,0 +1,10 @@
+server:
+  port: ":50051"
+  timeout: "10s"
+
+limits:
+  upload: 10
+  list: 100
+
+storage:
+  path: "./storage"

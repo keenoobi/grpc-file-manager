@@ -7,7 +7,7 @@ import (
 	"net"
 
 	"github.com/keenoobi/grpc-file-manager/api/proto"
-	"github.com/keenoobi/grpc-file-manager/config"
+	"github.com/keenoobi/grpc-file-manager/internal/config"
 	"github.com/keenoobi/grpc-file-manager/internal/middleware"
 	"github.com/keenoobi/grpc-file-manager/internal/repository"
 	grpctransport "github.com/keenoobi/grpc-file-manager/internal/transport/grpc"

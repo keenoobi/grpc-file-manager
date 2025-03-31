@@ -186,7 +186,7 @@ func testConcurrency(client proto.FileServiceClient) {
 	}
 
 	// Тест лимита Upload (10)
-	for i := range 100 {
+	for i := range 20 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()

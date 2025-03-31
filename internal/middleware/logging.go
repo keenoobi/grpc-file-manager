@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-func LoggingUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
+func LoggingUnaryInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
 	start := time.Now()
 	slog.Info("Unary call started", "method", info.FullMethod, "request", req)
 
@@ -18,7 +18,7 @@ func LoggingUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.Un
 	return
 }
 
-func LoggingStreamInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+func LoggingStreamInterceptor(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 	start := time.Now()
 	slog.Info("Stream call started", "method", info.FullMethod)
 

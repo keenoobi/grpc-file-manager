@@ -8,19 +8,19 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/keenoobi/grpc-file-manager/config"
 	"github.com/keenoobi/grpc-file-manager/internal/app"
+	"github.com/keenoobi/grpc-file-manager/internal/config"
 )
 
 const shutdownTimeout = 5 * time.Second
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelError,
+		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
 
-	cfg, err := config.Load("config/config.yaml")
+	cfg, err := config.Load("internal/config/config.yaml")
 	if err != nil {
 		slog.Error("Failed to load config", "error", err)
 		return

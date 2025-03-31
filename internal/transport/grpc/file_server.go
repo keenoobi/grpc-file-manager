@@ -1,6 +1,7 @@
 package grpc
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
@@ -24,7 +25,7 @@ func NewFileServiceServer(fileUseCase usecase.FileUseCase) proto.FileServiceServ
 func (s *fileServiceServer) UploadFile(stream proto.FileService_UploadFileServer) error {
 	req, err := stream.Recv()
 	if err != nil {
-		return status.Errorf(codes.Unknown, "cannot receive file info")
+		return status.Errorf(codes.Unknown, "cannot receive file info: %v", err)
 	}
 
 	metadata := req.GetMetadata()
@@ -37,34 +38,36 @@ func (s *fileServiceServer) UploadFile(stream proto.FileService_UploadFileServer
 		return status.Errorf(codes.InvalidArgument, "filename is required")
 	}
 
-	pr, pw := io.Pipe()
-	defer pr.Close()
+	// Создаем буфер для накопления данных
+	var buf bytes.Buffer
 
-	go func() {
-		defer pw.Close()
-		for {
-			req, err := stream.Recv()
-			if err == io.EOF {
-				return
-			}
-			if err != nil {
-				pw.CloseWithError(err)
-				return
-			}
-
-			chunk := req.GetChunk()
-			if _, err := pw.Write(chunk); err != nil {
-				pw.CloseWithError(err)
-				return
-			}
+	// Читаем оставшиеся сообщения (чанки данных)
+	for {
+		req, err := stream.Recv()
+		if err == io.EOF {
+			break
 		}
-	}()
+		if err != nil {
+			return status.Errorf(codes.Unknown, "cannot receive chunk: %v", err)
+		}
 
-	file, err := s.fileUseCase.UploadFile(stream.Context(), filename, pr)
+		chunk := req.GetChunk()
+		if chunk == nil {
+			continue
+		}
+
+		if _, err := buf.Write(chunk); err != nil {
+			return status.Errorf(codes.Internal, "cannot write chunk: %v", err)
+		}
+	}
+
+	// Сохраняем файл
+	file, err := s.fileUseCase.UploadFile(stream.Context(), filename, &buf)
 	if err != nil {
 		return status.Errorf(codes.Internal, "cannot save file: %v", err)
 	}
 
+	// Отправляем ответ
 	return stream.SendAndClose(&proto.UploadFileResponse{
 		Filename:  file.Name,
 		Size:      uint64(file.Size),

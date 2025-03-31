@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  file-server:
+    build: .
+    ports:
+      - "50051:50051"
+    volumes:
+      - ./storage:/storage
+      - ./config:/app/config
+    restart: unless-stopped

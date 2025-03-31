@@ -71,6 +71,7 @@ func TestUploadFile_Success(t *testing.T) {
 		Size:      4,
 		CreatedAt: time.Now(),
 	}
+
 	mockUC.On("UploadFile", mock.Anything, "test.txt", mock.Anything).Return(mockFile, nil)
 
 	mockStream := &mockUploadStream{
@@ -92,9 +93,17 @@ func TestUploadFile_Success(t *testing.T) {
 	require.NotNil(t, mockStream.lastResponse)
 	require.Equal(t, "test.txt", mockStream.lastResponse.Filename)
 	require.Equal(t, uint64(4), mockStream.lastResponse.Size)
+
+	mockUC.AssertCalled(t, "UploadFile", mock.Anything, "test.txt", mock.AnythingOfType("*bytes.Buffer"))
+
+	args := mockUC.Calls[0].Arguments
+	r := args.Get(2).(io.Reader)
+	data, err := io.ReadAll(r)
+	require.NoError(t, err)
+	require.Equal(t, []byte("data"), data)
+
 	mockUC.AssertExpectations(t)
 }
-
 func TestDownloadFile_Success(t *testing.T) {
 	mockUC := new(MockFileUseCase)
 	server := NewFileServiceServer(mockUC)

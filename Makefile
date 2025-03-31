@@ -14,7 +14,7 @@ PROTOC = protoc
 PROTOC_FLAGS = --go_out=. --go_opt=paths=source_relative \
                --go-grpc_out=. --go-grpc_opt=paths=source_relative
 
-.PHONY: all generate build-server build-client build run-server run-client test clean deps
+.PHONY: all generate build-server build-client build server client test clean deps
 all: build
 
 generate:
@@ -28,18 +28,35 @@ build-client:
 
 build: generate build-server build-client
 
-run-server: build-server
-	$(BIN_DIR)/server -config $(CONFIG_DIR)/config.yaml
+server: build-server
+	$(BIN_DIR)/server
 
-run-client: build-client
+client: build-client
 	$(BIN_DIR)/client
+
+compose-up:
+	docker compose up -d --build
+
+compose-down:
+	docker compose down
 
 test:
 	$(GO_TEST) ./...
 
+test-race:
+	$(GO_TEST) -race ./...
+
+coverage:
+	$(GO_TEST) ./... -coverprofile=coverage.out
+	go tool cover -html=coverage.out -o coverage.html && open coverage.html
+
 clean:
 	rm -rf $(BIN_DIR)
 	rm -rf coverage*
+
+clean-storage:
+	rm -rf ./storage/*
+	rm -rf ./test_data
 
 deps:
 	$(GO_INSTALL) google.golang.org/protobuf/cmd/protoc-gen-go@latest

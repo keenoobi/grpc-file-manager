@@ -9,7 +9,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func RecoveryUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
+func RecoveryUnaryInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Info("Recovered from panic in unary handler")
@@ -20,7 +20,7 @@ func RecoveryUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.U
 	return handler(ctx, req)
 }
 
-func RecoveryStreamInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) (err error) {
+func RecoveryStreamInterceptor(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Info("Recovered from panic in stream handler")
